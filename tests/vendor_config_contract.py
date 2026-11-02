@@ -11,14 +11,28 @@ ROOT=Path(__file__).resolve().parents[1]
 yaml.SafeLoader.add_constructor('!override',lambda loader,node: loader.construct_sequence(node) if isinstance(node,yaml.SequenceNode) else loader.construct_mapping(node) if isinstance(node,yaml.MappingNode) else loader.construct_scalar(node))
 files=sorted([*ROOT.glob('components/**/compose*.yaml'),*ROOT.glob('vendor/**/compose*.yaml')])
 assert len(files)==12,len(files)
-fixture_env=dict(os.environ, MIDDLEWARE_RELEASE_ROOT='/ci-only/release', KONG_PG_PASSWORD='ci-disposable-only', SMS_DB_PASSWORD='ci-disposable-only', SMS_DLR_TOKEN='ci-disposable-only', PORTAL_ENV_FILE='/ci-only/portal.env')
+fixture_env=dict(os.environ, MIDDLEWARE_RELEASE_ROOT='/ci-only/release', KONG_PG_PASSWORD='ci-disposable-only', SMS_DB_PASSWORD='ci-disposable-only', SMS_DLR_TOKEN='ci-disposable-only')
+external_env_files={'/etc/kyqra-telnexa-integration/shared.env', '/etc/codestra/secrets/kyqra-telnexa/middleware.env', '${PORTAL_ENV_FILE:-/etc/codestra/secrets/reseller-portal.env}'}
 for file in files:
     data=yaml.safe_load(file.read_text())
     assert isinstance(data.get('services'),dict) and data['services'],file
     for name,service in data['services'].items():
         if 'image' in service:
             assert re.fullmatch(r'[^@]+@sha256:[0-9a-f]{64}',service['image']),(file,name)
-    subprocess.run(['docker','compose','-f',str(file),'config','--no-env-resolution','--quiet'],check=True,env=fixture_env)
+        references=service.get('env_file',[])
+        if isinstance(references,str):references=[references]
+        assert all(isinstance(ref,str) and ref in external_env_files for ref in references),(file,name,'unreviewed external environment reference')
+    # Compose still checks required external file existence with no-env-resolution.
+    # Parse an exact source copy with only these reviewed external-input paths
+    # substituted by an empty CI fixture; no runtime input contents are certified.
+    with tempfile.TemporaryDirectory() as temporary:
+        fixture=Path(temporary)/'empty.env';fixture.write_text('')
+        candidate=file.read_text()
+        for reference in external_env_files:
+            if not reference.startswith('${'):candidate=candidate.replace(reference,str(fixture))
+        parse_file=Path(temporary)/'compose.yaml';parse_file.write_text(candidate)
+        environment=dict(fixture_env,PORTAL_ENV_FILE=str(fixture))
+        subprocess.run(['docker','compose','--project-directory',str(file.parent),'-f',str(parse_file),'config','--no-env-resolution','--quiet'],check=True,env=environment)
 sms=yaml.safe_load((ROOT/'components/sms-api/compose.yaml').read_text())
 assert sms['services']['api']['environment']['LIVE_SMS_DELIVERY']=='false'
 assert sms['services']['api']['environment']['LIVE_SUBMISSION_ENABLED']=='false'
