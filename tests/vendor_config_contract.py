@@ -70,7 +70,7 @@ PARTIAL_COMPOSE={
     'vendor/reseller-portal-postgres/compose.yaml',
 }
 PARTIAL_CADDY='vendor/private-vicidial-ingress/Caddyfile'
-EXTERNAL_ENV_FILES={'/etc/kyqra-telnexa-integration/shared.env', '/etc/codestra/secrets/kyqra-telnexa/middleware.env', '${PORTAL_ENV_FILE:-/etc/codestra/secrets/reseller-portal.env}'}
+EXTERNAL_ENV_FILES={'/etc/kyqra-telnexa-integration/shared.env', '/etc/codestra/secrets/kyqra-telnexa/middleware.env', '${PORTAL_ENV_FILE:-/etc/codestra/secrets/reseller-portal.env}', '/etc/codestra/secrets/mail-platform/stalwart/runtime.env'}
 yaml.SafeLoader.add_constructor('!override',lambda loader,node: loader.construct_sequence(node) if isinstance(node,yaml.SequenceNode) else loader.construct_mapping(node) if isinstance(node,yaml.MappingNode) else loader.construct_scalar(node))
 
 
@@ -126,6 +126,13 @@ def validate_external_fragments(root):
     ]
 
 
+def validate_env_references(service):
+    references=service.get('env_file',[])
+    if isinstance(references,str):references=[references]
+    if not isinstance(references,list) or not all(isinstance(ref,str) and ref in EXTERNAL_ENV_FILES for ref in references):
+        raise ValueError('Unreviewed external environment reference')
+
+
 def validate_standalone_compose(root):
     files=sorted([*root.glob('components/**/compose*.yaml'),*root.glob('vendor/**/compose*.yaml')])
     if len(files)!=12:raise ValueError('Unreviewed Compose inventory')
@@ -136,9 +143,7 @@ def validate_standalone_compose(root):
         if not isinstance(data.get('services'),dict) or not data['services']:raise ValueError('Missing services')
         for name,service in data['services'].items():
             if 'image' in service and not re.fullmatch(r'[^@]+@sha256:[0-9a-f]{64}',service['image']):raise ValueError('Mutable image reference')
-            references=service.get('env_file',[])
-            if isinstance(references,str):references=[references]
-            if not all(isinstance(ref,str) and ref in EXTERNAL_ENV_FILES for ref in references):raise ValueError('Unreviewed external environment reference')
+            validate_env_references(service)
         if str(file.relative_to(root)) in PARTIAL_COMPOSE:
             continue  # Exact frozen fragment contract above, explicitly NOT complete Compose certification.
         with tempfile.TemporaryDirectory() as temporary:

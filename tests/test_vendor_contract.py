@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import unittest
 import yaml
-from vendor_config_contract import ROOT, FROZEN_VENDOR_FILES, validate_vendor_authority, validate_external_fragments
+from vendor_config_contract import ROOT, FROZEN_VENDOR_FILES, validate_vendor_authority, validate_external_fragments, validate_env_references
 
 class FrozenVendorContractTests(unittest.TestCase):
     def setUp(self):
@@ -51,6 +51,12 @@ class FrozenVendorContractTests(unittest.TestCase):
         path.write_text(original)
         path=self.root/'vendor/private-vicidial-ingress/Caddyfile';path.write_text(path.read_text().replace('/etc/caddy/snippets/breero-private-route','/etc/caddy/other'))
         self.assertRaises(ValueError,validate_external_fragments,self.root)
+
+    def test_all_default_environment_inputs_are_exact_and_unknown_inputs_fail(self):
+        for file in sorted([*ROOT.glob('components/**/compose*.yaml'),*ROOT.glob('vendor/**/compose*.yaml')]):
+            for service in yaml.safe_load(file.read_text())['services'].values():validate_env_references(service)
+        for references in ('/unreviewed.env',[{'path':'/unreviewed.env'}],None):
+            self.assertRaises(ValueError,validate_env_references,{'env_file':references})
 
     def test_vendor_source_cannot_rewrite_its_expected_blob(self):
         path=next(iter(FROZEN_VENDOR_FILES));file=self.root/path;file.write_bytes(file.read_bytes()+b'changed')
