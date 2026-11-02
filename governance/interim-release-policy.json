@@ -70,5 +70,5 @@
     "deployment_authority"
   ],
   "production_activation_authorized": false,
-  "note": "GitHub rulesets remain the enforcement authority. This source-validation policy is not custom-controller certification or deployment authorization. This validates owned source and isolated configuration contracts only; production runtime, host-owned imports and 64-workload identity/artifact evidence remain separately unauthorized."
+  "note": "GitHub rulesets remain the enforcement authority. This source-validation policy is not custom-controller certification or deployment authorization. Owned application source and five images are tested; all original vendor files are frozen, ten standalone Compose files and three standalone Caddy configurations are parsed. Two Compose imports and one Caddy fragment retain EXTERNAL_RUNTIME_BINDING_HOLD for exact unresolved external sources. Production activation and 64-workload identity/artifact evidence remain separately unauthorized. This is ordinary GitHub CI under the existing repository review controls; the PR workflow itself is not an independently immutable or tamperproof trust root."
 }
