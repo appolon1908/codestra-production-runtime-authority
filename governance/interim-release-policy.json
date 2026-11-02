@@ -38,6 +38,21 @@
       "context": "immutable-images (sms-api-event-worker)",
       "integration_id": 15368,
       "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "validate",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/validate-deployment-digests.yml"
+    },
+    {
+      "context": "component-source-tests",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/component-source-tests.yml"
+    },
+    {
+      "context": "vendor-config-contracts",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/component-source-tests.yml"
     }
   ],
   "replaces_contexts": [
@@ -55,5 +70,5 @@
     "deployment_authority"
   ],
   "production_activation_authorized": false,
-  "note": "GitHub rulesets remain the enforcement authority. This source-validation policy is not custom-controller certification or deployment authorization."
+  "note": "GitHub rulesets remain the enforcement authority. This source-validation policy is not custom-controller certification or deployment authorization. This validates owned source and isolated configuration contracts only; production runtime, host-owned imports and 64-workload identity/artifact evidence remain separately unauthorized."
 }

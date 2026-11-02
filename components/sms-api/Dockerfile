@@ -5,6 +5,13 @@ ARG VERSION
 LABEL org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.source=$SOURCE_URL \
       org.opencontainers.image.version=$VERSION
+# Preserve the immutable Python/Bookworm base; apply only signed Debian security fixes.
+RUN apt-get update \
+    && apt-get install --no-install-recommends --only-upgrade -y \
+       libpcre2-8-0=10.42-1+deb12u2 \
+       libssl3=3.0.22-1~deb12u2 \
+       perl-base=5.36.0-7+deb12u4 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY requirements.txt .

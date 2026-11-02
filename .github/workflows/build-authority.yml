@@ -23,6 +23,9 @@ jobs:
           - sms-api-event-worker
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Resolve reviewed build context
         run: |
@@ -38,16 +41,39 @@ jobs:
           context: ${{ env.BUILD_CONTEXT }}
           push: false
           load: true
-          tags: local/${{ matrix.component }}:${{ github.sha }}
+          tags: local/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           build-args: |
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
-            VERSION=${{ github.sha }}
+            VERSION=${{ github.event.pull_request.head.sha || github.sha }}
           provenance: false
           sbom: false
+      - name: Exercise actual final image in a read-only container without network
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          pattern="test_${COMPONENT//-/_}.py"
+          source_root=/app
+          if [[ "$COMPONENT" == sms-api* ]]; then source_root=/srv; fi
+          docker run --rm --network none --read-only --user 65532:65532 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            -v "$PWD:/source:ro" -e "COMPONENT_SOURCE_ROOT=$source_root" \
+            --entrypoint python "local/$COMPONENT:$IMAGE_SHA" \
+            -m unittest discover -s /source/tests -p "$pattern" -v
+          if [[ "$COMPONENT" == sms-api ]]; then
+            docker run --rm --network none --read-only --user 65532:65532 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+              -v "$PWD:/source:ro" -e PYTHONPATH=/srv \
+              --entrypoint python "local/$COMPONENT:$IMAGE_SHA" \
+              -m unittest discover -s /source/components/sms-api/tests -p 'test_*.py' -v
+          fi
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: local/${{ matrix.component }}:${{ github.sha }}
+          image-ref: local/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
@@ -63,11 +89,11 @@ jobs:
         with:
           context: ${{ env.BUILD_CONTEXT }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           build-args: |
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
-            VERSION=${{ github.sha }}
+            VERSION=${{ github.event.pull_request.head.sha || github.sha }}
           provenance: mode=max
           sbom: true
       - name: Verify registry-native SBOM and provenance

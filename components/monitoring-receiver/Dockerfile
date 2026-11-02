@@ -6,6 +6,13 @@ LABEL org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.source=$SOURCE_URL \
       org.opencontainers.image.version=$VERSION
 RUN pip install --no-cache-dir fastapi==0.141.1 starlette==1.6.0 uvicorn==0.52.4
+# Preserve the immutable Python/Bookworm base; apply only signed Debian security fixes.
+RUN apt-get update \
+    && apt-get install --no-install-recommends --only-upgrade -y \
+       libpcre2-8-0=10.42-1+deb12u2 \
+       libssl3=3.0.22-1~deb12u2 \
+       perl-base=5.36.0-7+deb12u4 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY app.py /app/app.py
 USER 65532:65532
