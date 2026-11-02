@@ -23,6 +23,9 @@ jobs:
           - sms-api-event-worker
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Resolve reviewed build context
         run: |
@@ -38,16 +41,67 @@ jobs:
           context: ${{ env.BUILD_CONTEXT }}
           push: false
           load: true
-          tags: local/${{ matrix.component }}:${{ github.sha }}
+          tags: local/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           build-args: |
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
-            VERSION=${{ github.sha }}
+            VERSION=${{ github.event.pull_request.head.sha || github.sha }}
           provenance: false
           sbom: false
+      - name: Exercise actual final image in a read-only container without network
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          pattern="test_${COMPONENT//-/_}.py"
+          source_root=/app
+          if [[ "$COMPONENT" == sms-api* ]]; then source_root=/srv; fi
+          docker run --rm --network none --read-only --user 65532:65532 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            -v "$PWD:/source:ro" -e "COMPONENT_SOURCE_ROOT=$source_root" \
+            --entrypoint python "local/$COMPONENT:$IMAGE_SHA" \
+            -m unittest discover -s /source/tests -p "$pattern" -v
+          if [[ "$COMPONENT" == sms-api ]]; then
+            docker run --rm --network none --read-only --user 65532:65532 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+              -v "$PWD:/source:ro" -e PYTHONPATH=/srv \
+              --entrypoint python "local/$COMPONENT:$IMAGE_SHA" \
+              -m unittest discover -s /source/components/sms-api/tests -p 'test_*.py' -v
+          fi
+      - name: Certify SMS database compatibility inside the actual final image
+        if: matrix.component == 'sms-api'
+        env:
+          IMAGE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          network="authority-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker pull postgres:17-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+          docker network create --internal "$network"
+          trap 'docker rm -f authority-postgres-ci >/dev/null 2>&1 || true; docker network rm "$network" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name authority-postgres-ci --network "$network" \
+            --tmpfs /var/lib/postgresql/data:rw,size=256m \
+            -e POSTGRES_DB=codestra_ci -e POSTGRES_USER=codestra_ci \
+            -e POSTGRES_PASSWORD=ci-disposable-only \
+            postgres:17-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+          ready=false
+          for attempt in {1..30}; do
+            if docker exec authority-postgres-ci pg_isready -U codestra_ci -d codestra_ci; then ready=true; break; fi
+            sleep 1
+          done
+          test "$ready" = true
+          docker run --rm --network "$network" --read-only --user 65532:65532 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m -v "$PWD:/source:ro" \
+            -e COMPONENT_SOURCE_ROOT=/srv -e CI_DATABASE_ISOLATED=true \
+            -e CI_DATABASE_URL=postgresql://codestra_ci:ci-disposable-only@authority-postgres-ci/codestra_ci \
+            --entrypoint python "local/sms-api:$IMAGE_SHA" \
+            -m unittest discover -s /source/tests -p postgres_contract.py -v
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: local/${{ matrix.component }}:${{ github.sha }}
+          image-ref: local/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
@@ -63,11 +117,11 @@ jobs:
         with:
           context: ${{ env.BUILD_CONTEXT }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:${{ github.event.pull_request.head.sha || github.sha }}
           build-args: |
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
-            VERSION=${{ github.sha }}
+            VERSION=${{ github.event.pull_request.head.sha || github.sha }}
           provenance: mode=max
           sbom: true
       - name: Verify registry-native SBOM and provenance

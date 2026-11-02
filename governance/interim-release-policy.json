@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "policy_kind": "source_merge",
+  "repository": "appolon1908/codestra-production-runtime-authority",
+  "authorization_date": "2026-11-02",
+  "required_checks": [
+    {
+      "context": "validate-source",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/authority.yml"
+    },
+    {
+      "context": "security",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/authority.yml"
+    },
+    {
+      "context": "immutable-images (kong-service-auth-adapter)",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "immutable-images (monitoring-receiver)",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "immutable-images (private-integration-gateway)",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "immutable-images (sms-api)",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "immutable-images (sms-api-event-worker)",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/build-authority.yml"
+    },
+    {
+      "context": "validate",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/validate-deployment-digests.yml"
+    },
+    {
+      "context": "component-source-tests",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/component-source-tests.yml"
+    },
+    {
+      "context": "vendor-config-contracts",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/component-source-tests.yml"
+    }
+  ],
+  "replaces_contexts": [
+    "codestra-control-plane",
+    "codestra/control-plane"
+  ],
+  "preserve": [
+    "other_required_checks",
+    "review_requirements",
+    "ref_conditions",
+    "bypass_actors",
+    "enforcement",
+    "force_push_protection",
+    "deletion_protection",
+    "deployment_authority"
+  ],
+  "production_activation_authorized": false,
+  "note": "GitHub rulesets remain the enforcement authority. This source-validation policy is not custom-controller certification or deployment authorization. Owned application source and five images are tested; all original vendor files are frozen, ten standalone Compose files and three standalone Caddy configurations are parsed. Two Compose imports and one Caddy fragment retain EXTERNAL_RUNTIME_BINDING_HOLD for exact unresolved external sources. Production activation and 64-workload identity/artifact evidence remain separately unauthorized. This is ordinary GitHub CI under the existing repository review controls; the PR workflow itself is not an independently immutable or tamperproof trust root."
+}
