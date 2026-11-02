@@ -30,7 +30,11 @@ class PostgresContracts(unittest.TestCase):
 
     def setUp(self):
         self.conn.execute('TRUNCATE sms_accounts CASCADE')
-        self.conn.execute((ROOT/'components/sms-api/migrations/002_synthetic_certification.sql').read_text())
+        # Seed the latest schema directly; historical migration002 predates
+        # provider_sender NOTNULL and must not be replayed as a current fixture.
+        account=self.conn.execute("INSERT INTO sms_accounts(kong_consumer_id,customer_code,status,sms_entitled,balance) VALUES('2a9add4c-70fa-4e12-9b62-ed3d1090349a','SYNTHETIC-A','active',true,10) RETURNING id").fetchone()['id']
+        self.conn.execute("INSERT INTO sms_account_limits(account_id,messages_per_minute,max_segments,duplicate_window_seconds) VALUES(%s,2,6,300)",(account,))
+        self.conn.execute("INSERT INTO sms_sender_profiles(account_id,sender,sender_type,country_codes,provider_sender) VALUES(%s,'CODESTRA','alphanumeric',ARRAY['+1809'],'TEST')",(account,))
         env={'DATABASE_URL':self.dsn,'LIVE_SUBMISSION_ENABLED':'false','LIVE_SMS_DELIVERY':'false','TELNEXA_BASE_URL':'https://invalid.test','TELNEXA_CLIENT_CERT_FILE':'/ci-only/client.crt','TELNEXA_CLIENT_KEY_FILE':'/ci-only/client.key','TELNEXA_CA_FILE':'/ci-only/ca.crt','TELNEXA_MIDDLEWARE_API_KEY':'ci-fixture-key','TELNEXA_WEBHOOK_SECRET':'ci-fixture-secret','SMS_DLR_TOKEN':'ci-fixture-token'}
         guard=patch.dict(os.environ,env);guard.start();self.addCleanup(guard.stop)
         guard=patch.object(main,'verifier',return_value=hashlib.sha256(b'ci-gateway').hexdigest());guard.start();self.addCleanup(guard.stop)
