@@ -164,22 +164,52 @@ def validate_safety_and_owned_inventory(root):
     assert sms['services']['api']['environment']['LIVE_SMS_DELIVERY']=='false'
     assert sms['services']['api']['environment']['LIVE_SUBMISSION_ENABLED']=='false'
     assert all(sms['services'][name]['read_only'] for name in ('api','event-worker'))
-    assert yaml.safe_load((root/'VENDOR-DEPLOYMENT-AUTHORITY.yaml').read_text())['policy']['runtime_replacement_authorized'] is False
-    assert yaml.safe_load((root/'AUTHORITY-IMPORT-MANIFEST.yaml').read_text())['business_writes_enabled'] is False
-    assert json.loads((root/'monitoring-integration.v1.json').read_text())['activation_enabled'] is False
+    vendor=yaml.safe_load((root/'VENDOR-DEPLOYMENT-AUTHORITY.yaml').read_text())
+    assert vendor['production_changed'] is False and vendor['deployment_authorized'] is False
+    assert vendor['policy']['runtime_replacement_authorized'] is False
+    assert vendor['policy']['external_business_writes_enabled'] is False
+    authority=yaml.safe_load((root/'AUTHORITY-IMPORT-MANIFEST.yaml').read_text())
+    assert authority['production_changed'] is False and authority['business_writes_enabled'] is False
+    monitoring=json.loads((root/'monitoring-integration.v1.json').read_text())
+    assert monitoring['activation_enabled'] is False and monitoring['runtime_onboarding_allowed'] is False
     owned={str(p.relative_to(root)) for p in (root/'components').rglob('*.py') if '/tests/' not in str(p) and not p.name.startswith('test_')}
     assert owned=={'components/kong-service-auth-adapter/adapter.py','components/monitoring-receiver/app.py','components/private-integration-gateway/gateway.py','components/sms-api/app/__init__.py','components/sms-api/app/main.py','components/sms-api/app/event_worker.py'},owned
 
 
+CADDY_AMD64_SHA256='b7105518e3ed1c0761f232e44fc09345535533c9cb0abf0e12809416c7ac64d9'
+
+
+def capability_free_parser_copy(source,target,expected_sha=CADDY_AMD64_SHA256):
+    """Preserve exact bytes while avoiding the official binary's bind-service filecap.
+
+    This is only an offline parser copy; production images and container capability
+    bounds/no-new-privileges remain unchanged. Exclusive creation preserves no xattrs.
+    """
+    raw=source.read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=expected_sha:raise ValueError('Caddy parser source bytes do not match the verified OCI layer')
+    with target.open('xb') as handle:handle.write(raw)
+    target.chmod(0o755)
+    if 'security.capability' in os.listxattr(target):raise ValueError('Parser copy retains a file capability')
+    if hashlib.sha256(target.read_bytes()).hexdigest()!=expected_sha:raise ValueError('Caddy parser copy changed bytes')
+
+
 def validate_standalone_caddy(root):
     image='caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648'
-    subprocess.run(['docker','pull',image],check=True)
+    subprocess.run(['docker','pull','--platform','linux/amd64',image],check=True)
     count=0
-    for config in sorted((root/'vendor').glob('*/Caddyfile')):
-        if str(config.relative_to(root))==PARTIAL_CADDY:continue
-        if re.findall(r'^\s*import\s+(\S+)',config.read_text(),re.M):raise ValueError('Unknown external Caddy import')
-        subprocess.run(['docker','run','--rm','--network','none','--read-only','--user','65532:65532','--cap-drop','ALL','--security-opt','no-new-privileges','-v',f'{root}:/source:ro','--entrypoint','caddy',image,'adapt','--config','/source/'+str(config.relative_to(root)),'--adapter','caddyfile'],check=True,stdout=subprocess.DEVNULL)
-        count+=1
+    with tempfile.TemporaryDirectory() as temporary:
+        extracted=Path(temporary)/'caddy-original';parser=Path(temporary)/'caddy-parser'
+        # Create does not start a server or execute the image entrypoint.
+        container=subprocess.check_output(['docker','create','--platform','linux/amd64','--network','none',image],text=True).strip()
+        try:subprocess.run(['docker','cp',container+':/usr/bin/caddy',str(extracted)],check=True)
+        finally:subprocess.run(['docker','rm','--volumes',container],check=True)
+        capability_free_parser_copy(extracted,parser)
+        print('CADDY_PARSER_IDENTICAL_BYTES_NO_FILE_CAPABILITY=PASS sha256='+CADDY_AMD64_SHA256)
+        for config in sorted((root/'vendor').glob('*/Caddyfile')):
+            if str(config.relative_to(root))==PARTIAL_CADDY:continue
+            if re.findall(r'^\s*import\s+(\S+)',config.read_text(),re.M):raise ValueError('Unknown external Caddy import')
+            subprocess.run(['docker','run','--rm','--platform','linux/amd64','--network','none','--read-only','--user','65532:65532','--cap-drop','ALL','--security-opt','no-new-privileges','-v',f'{root}:/source:ro','-v',f'{parser}:/ci-tools/caddy:ro','--entrypoint','/ci-tools/caddy',image,'adapt','--config','/source/'+str(config.relative_to(root)),'--adapter','caddyfile'],check=True,stdout=subprocess.DEVNULL)
+            count+=1
     if count!=3:raise ValueError('Standalone Caddy inventory changed')
     return count
 

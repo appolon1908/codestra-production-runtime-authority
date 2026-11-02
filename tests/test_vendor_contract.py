@@ -1,10 +1,12 @@
 import copy
+import hashlib
+from unittest.mock import patch
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
 import yaml
-from vendor_config_contract import ROOT, FROZEN_VENDOR_FILES, validate_vendor_authority, validate_external_fragments, validate_env_references
+from vendor_config_contract import ROOT, FROZEN_VENDOR_FILES, validate_vendor_authority, validate_external_fragments, validate_env_references, capability_free_parser_copy
 
 class FrozenVendorContractTests(unittest.TestCase):
     def setUp(self):
@@ -57,6 +59,21 @@ class FrozenVendorContractTests(unittest.TestCase):
             for service in yaml.safe_load(file.read_text())['services'].values():validate_env_references(service)
         for references in ('/unreviewed.env',[{'path':'/unreviewed.env'}],None):
             self.assertRaises(ValueError,validate_env_references,{'env_file':references})
+
+    def test_parser_copy_is_byte_identical_and_has_no_file_capability(self):
+        source=self.root/'parser-source';source.write_bytes(b'isolated parser fixture')
+        target=self.root/'parser-copy';digest=hashlib.sha256(source.read_bytes()).hexdigest()
+        capability_free_parser_copy(source,target,digest)
+        self.assertEqual(source.read_bytes(),target.read_bytes())
+        self.assertEqual(target.stat().st_mode & 0o777,0o755)
+        self.assertRaises(FileExistsError,capability_free_parser_copy,source,target,digest)
+
+    def test_parser_wrong_source_hash_or_retained_filecap_fails(self):
+        source=self.root/'parser-source';source.write_bytes(b'isolated parser fixture')
+        self.assertRaises(ValueError,capability_free_parser_copy,source,self.root/'wrong','0'*64)
+        digest=hashlib.sha256(source.read_bytes()).hexdigest()
+        with patch('vendor_config_contract.os.listxattr',return_value=['security.capability']):
+            self.assertRaises(ValueError,capability_free_parser_copy,source,self.root/'retained',digest)
 
     def test_vendor_source_cannot_rewrite_its_expected_blob(self):
         path=next(iter(FROZEN_VENDOR_FILES));file=self.root/path;file.write_bytes(file.read_bytes()+b'changed')
